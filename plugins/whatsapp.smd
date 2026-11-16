@@ -492,7 +492,7 @@ cmd({
     await ctx.error(err + "\n\ncommand: vv", err);
   }
 });
-smd({
+cmd({
   pattern: "dbg",
   desc: "debug reply message",
   category: "whatsapp",
