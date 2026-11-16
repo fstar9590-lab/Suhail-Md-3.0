@@ -421,13 +421,42 @@ cmd({
   filename: __filename
 }, async (ctx, text) => {
   try {
-    var viewOnceMsg = ctx.reply_message ? ctx.reply_message : false;
+    var viewOnceMsg = ctx.reply_message && ctx.reply_message.viewOnce ? ctx.reply_message : false;
     if (!viewOnceMsg) {
       return ctx.reply("```Please Reply A ViewOnce Message```");
     }
+    let quoted = {
+      key: viewOnceMsg.key,
+      message: {
+        conversation: "```[VIEWONCE FOUND DOWNLOAD 100%]```"
+      }
+    };
+    let mediaPath = await ctx.bot.downloadAndSaveMediaMessage(viewOnceMsg.msg);
+    await ctx.bot.sendMessage(ctx.jid, {
+      [viewOnceMsg.mtype2.split("Mes")[0]]: {
+        url: mediaPath
+      },
+      caption: viewOnceMsg.body
+    }, {
+      quoted: quoted
+    });
+  } catch (err) {
+    // was `message.error` - there is no `message` in this handler (it is `ctx`), so any failure
+    // inside .vv threw a second ReferenceError and the actual cause was lost.
+    await ctx.error(err + "\n\ncommand: vv", err);
+  }
+});
+cmd({
+  pattern: "vv2",
+  desc: "viewonce test",
+  category: "whatsapp",
+  filename: __filename
+}, async (ctx, text) => {
+  try {
+    const r = ctx.reply_message;
+    if (!r) return ctx.reply("```VV2-NEW: koi message reply nahi hua```");
 
-    // naye WhatsApp ke wrappers hatao
-    let media = viewOnceMsg.msg || {};
+    let media = r.msg || {};
     for (let i = 0; i < 4; i++) {
       let w = media.viewOnceMessageV2 || media.viewOnceMessageV2Extension || media.viewOnceMessage || media.ephemeralMessage;
       if (w && w.message) {
@@ -438,28 +467,22 @@ cmd({
     }
 
     if (!media || !media.mediaKey) {
-      return ctx.reply("```Media nahi mila. Keys: " + Object.keys(media || {}).join(", ") + "```");
+      return ctx.reply("```VV2-NEW: media nahi mila\nreplyKeys: " + Object.keys(r).join(", ") +
+        "\nmsgKeys: " + Object.keys(r.msg || {}).join(", ") + "```");
     }
 
     let mime = media.mimetype || "";
     let type = mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "image";
-
-    let quoted = {
-      key: viewOnceMsg.key,
-      message: {
-        conversation: "```[VIEWONCE FOUND DOWNLOAD 100%]```"
-      }
-    };
     let mediaPath = await ctx.bot.downloadAndSaveMediaMessage(media);
     let payload = { [type]: { url: mediaPath } };
     if (type === "audio") {
       payload.mimetype = mime || "audio/mp4";
       payload.ptt = Boolean(media.ptt);
     } else {
-      payload.caption = media.caption || viewOnceMsg.body || "";
+      payload.caption = media.caption || r.body || "";
     }
-    await ctx.bot.sendMessage(ctx.jid, payload, { quoted: quoted });
+    await ctx.bot.sendMessage(ctx.jid, payload, { quoted: ctx });
   } catch (err) {
-    await ctx.error(err + "\n\ncommand: vv", err);
+    await ctx.reply("```VV2-NEW error: " + err + "```");
   }
 });
