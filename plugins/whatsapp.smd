@@ -492,4 +492,24 @@ cmd({
     await ctx.error(err + "\n\ncommand: vv", err);
   }
 });
-
+smd({
+  pattern: "dbg",
+  desc: "debug reply message",
+  category: "whatsapp",
+  fromMe: true,
+  filename: __filename
+}, async (ctx) => {
+  try {
+    const r = ctx.reply_message;
+    const info = {
+      replyKeys: r ? Object.keys(r) : null,
+      mtype: r?.mtype,
+      viewOnce: r?.viewOnce,
+      msgKeys: r?.msg ? Object.keys(r.msg) : null,
+      hasMediaKey: !!r?.msg?.mediaKey
+    };
+    await ctx.reply("```" + JSON.stringify(info, null, 2) + "```");
+  } catch (e) {
+    await ctx.reply("```" + String(e) + "```");
+  }
+});
