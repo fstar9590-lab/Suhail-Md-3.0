@@ -412,7 +412,7 @@ smd({
     await ctx.error(err + "\n\ncommand: unblock", err);
   }
 });
-cmd({
+Cmd({
   pattern: "vv",
   alias: ["viewonce", "retrive"],
   desc: "download viewOnce Message.",
@@ -422,44 +422,40 @@ cmd({
 }, async (ctx, text) => {
   try {
     const fs = require("fs");
-    const replied = ctx.reply_message;
-    if (!replied) {
+
+    // 1. Grab quoted message from serializer OR directly from raw Baileys contextInfo
+    const rawQuoted =
+      ctx.reply_message?.message ||
+      ctx.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
+      ctx.msg?.contextInfo?.quotedMessage;
+
+    if (!ctx.reply_message && !rawQuoted) {
       return ctx.reply("```Please Reply A ViewOnce Message```");
     }
 
-    // Unwrap all possible WhatsApp ViewOnce containers (v1, v2, v2Extension, or direct)
-    const rawMsg = replied.message || {};
-    const unwrapped =
-      rawMsg?.viewOnceMessage?.message ||
-      rawMsg?.viewOnceMessageV2?.message ||
-      rawMsg?.viewOnceMessageV2Extension?.message ||
-      rawMsg;
+    // 2. Unwrap any nested wrappers (ephemeral, viewOnce v1 / v2 / v2Extension)
+    let inner = rawQuoted || {};
+    for (let i = 0; i < 4; i++) {
+      if (inner?.ephemeralMessage?.message) inner = inner.ephemeralMessage.message;
+      else if (inner?.viewOnceMessage?.message) inner = inner.viewOnceMessage.message;
+      else if (inner?.viewOnceMessageV2?.message) inner = inner.viewOnceMessageV2.message;
+      else if (inner?.viewOnceMessageV2Extension?.message) inner = inner.viewOnceMessageV2Extension.message;
+      else break;
+    }
 
-    // Extract the actual inner media node (imageMessage, videoMessage, or audioMessage)
+    // 3. Find the media object (from unwrapped message or serializer's .msg)
     const mediaKey = ["imageMessage", "videoMessage", "audioMessage"].find(
-      (key) => unwrapped && unwrapped[key]
+      (k) => inner && inner[k]
     );
-    const mediaObj = mediaKey ? unwrapped[mediaKey] : replied.msg;
+    const mediaObj = mediaKey ? inner[mediaKey] : ctx.reply_message?.msg;
 
-    // Verify it is actually a ViewOnce message across old and new Baileys formats
-    const isViewOnce = Boolean(
-      replied.viewOnce ||
-      rawMsg?.viewOnceMessage ||
-      rawMsg?.viewOnceMessageV2 ||
-      rawMsg?.viewOnceMessageV2Extension ||
-      mediaObj?.viewOnce ||
-      replied.msg?.viewOnce
-    );
-
-    if (!isViewOnce || !mediaObj) {
-      return ctx.reply("```Please Reply A ViewOnce Message```");
+    if (!mediaObj || !mediaObj.mediaKey) {
+      console.log("[VV DEBUG] No mediaKey found. reply_message:", Object.keys(ctx.reply_message || {}), "rawQuoted:", Object.keys(rawQuoted || {}));
+      return ctx.reply("```Please Reply A ViewOnce Message (No Media Found)```");
     }
 
-    // Resolve clean Baileys send key: "image", "video", or "audio"
-    let sendType = mediaKey
-      ? mediaKey.replace("Message", "")
-      : (replied.mtype2 || replied.mtype || "").split("Mes")[0];
-
+    // 4. Determine send type ("image", "video", or "audio")
+    let sendType = mediaKey ? mediaKey.replace("Message", "") : "";
     if (!["image", "video", "audio"].includes(sendType)) {
       const mime = mediaObj.mimetype || "";
       if (mime.startsWith("image/")) sendType = "image";
@@ -468,15 +464,15 @@ cmd({
       else return ctx.reply("```Unsupported ViewOnce Media Type```");
     }
 
-    let quoted = {
-      key: replied.key,
+    const quoted = {
+      key: ctx.reply_message?.key || ctx.key,
       message: {
         conversation: "```[VIEWONCE FOUND DOWNLOAD 100%]```"
       }
     };
 
-    let mediaPath = await ctx.bot.downloadAndSaveMediaMessage(mediaObj);
-    let payload = {
+    const mediaPath = await ctx.bot.downloadAndSaveMediaMessage(mediaObj);
+    const payload = {
       [sendType]: { url: mediaPath }
     };
 
@@ -484,7 +480,7 @@ cmd({
       payload.mimetype = mediaObj.mimetype || "audio/mp4";
       payload.ptt = Boolean(mediaObj.ptt);
     } else {
-      payload.caption = mediaObj.caption || replied.body || "";
+      payload.caption = mediaObj.caption || ctx.reply_message?.body || "";
     }
 
     await ctx.bot.sendMessage(ctx.jid, payload, { quoted });
@@ -496,3 +492,4 @@ cmd({
     await ctx.error(err + "\n\ncommand: vv", err);
   }
 });
+
