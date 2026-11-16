@@ -421,95 +421,45 @@ cmd({
   filename: __filename
 }, async (ctx, text) => {
   try {
-    const fs = require("fs");
-
-    // 1. Grab quoted message from serializer OR directly from raw Baileys contextInfo
-    const rawQuoted =
-      ctx.reply_message?.message ||
-      ctx.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
-      ctx.msg?.contextInfo?.quotedMessage;
-
-    if (!ctx.reply_message && !rawQuoted) {
+    var viewOnceMsg = ctx.reply_message ? ctx.reply_message : false;
+    if (!viewOnceMsg) {
       return ctx.reply("```Please Reply A ViewOnce Message```");
     }
 
-    // 2. Unwrap any nested wrappers (ephemeral, viewOnce v1 / v2 / v2Extension)
-    let inner = rawQuoted || {};
+    // naye WhatsApp ke wrappers hatao
+    let media = viewOnceMsg.msg || {};
     for (let i = 0; i < 4; i++) {
-      if (inner?.ephemeralMessage?.message) inner = inner.ephemeralMessage.message;
-      else if (inner?.viewOnceMessage?.message) inner = inner.viewOnceMessage.message;
-      else if (inner?.viewOnceMessageV2?.message) inner = inner.viewOnceMessageV2.message;
-      else if (inner?.viewOnceMessageV2Extension?.message) inner = inner.viewOnceMessageV2Extension.message;
-      else break;
+      let w = media.viewOnceMessageV2 || media.viewOnceMessageV2Extension || media.viewOnceMessage || media.ephemeralMessage;
+      if (w && w.message) {
+        let inner = w.message;
+        let k = ["imageMessage", "videoMessage", "audioMessage"].find(x => inner[x]);
+        media = k ? inner[k] : inner;
+      } else break;
     }
 
-    // 3. Find the media object (from unwrapped message or serializer's .msg)
-    const mediaKey = ["imageMessage", "videoMessage", "audioMessage"].find(
-      (k) => inner && inner[k]
-    );
-    const mediaObj = mediaKey ? inner[mediaKey] : ctx.reply_message?.msg;
-
-    if (!mediaObj || !mediaObj.mediaKey) {
-      console.log("[VV DEBUG] No mediaKey found. reply_message:", Object.keys(ctx.reply_message || {}), "rawQuoted:", Object.keys(rawQuoted || {}));
-      return ctx.reply("```Please Reply A ViewOnce Message (No Media Found)```");
+    if (!media || !media.mediaKey) {
+      return ctx.reply("```Media nahi mila. Keys: " + Object.keys(media || {}).join(", ") + "```");
     }
 
-    // 4. Determine send type ("image", "video", or "audio")
-    let sendType = mediaKey ? mediaKey.replace("Message", "") : "";
-    if (!["image", "video", "audio"].includes(sendType)) {
-      const mime = mediaObj.mimetype || "";
-      if (mime.startsWith("image/")) sendType = "image";
-      else if (mime.startsWith("video/")) sendType = "video";
-      else if (mime.startsWith("audio/")) sendType = "audio";
-      else return ctx.reply("```Unsupported ViewOnce Media Type```");
-    }
+    let mime = media.mimetype || "";
+    let type = mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "image";
 
-    const quoted = {
-      key: ctx.reply_message?.key || ctx.key,
+    let quoted = {
+      key: viewOnceMsg.key,
       message: {
         conversation: "```[VIEWONCE FOUND DOWNLOAD 100%]```"
       }
     };
-
-    const mediaPath = await ctx.bot.downloadAndSaveMediaMessage(mediaObj);
-    const payload = {
-      [sendType]: { url: mediaPath }
-    };
-
-    if (sendType === "audio") {
-      payload.mimetype = mediaObj.mimetype || "audio/mp4";
-      payload.ptt = Boolean(mediaObj.ptt);
+    let mediaPath = await ctx.bot.downloadAndSaveMediaMessage(media);
+    let payload = { [type]: { url: mediaPath } };
+    if (type === "audio") {
+      payload.mimetype = mime || "audio/mp4";
+      payload.ptt = Boolean(media.ptt);
     } else {
-      payload.caption = mediaObj.caption || ctx.reply_message?.body || "";
+      payload.caption = media.caption || viewOnceMsg.body || "";
     }
-
-    await ctx.bot.sendMessage(ctx.jid, payload, { quoted });
-
-    if (mediaPath && fs.existsSync(mediaPath)) {
-      fs.unlinkSync(mediaPath);
-    }
+    await ctx.bot.sendMessage(ctx.jid, payload, { quoted: quoted });
   } catch (err) {
     await ctx.error(err + "\n\ncommand: vv", err);
-  }
-});
-cmd({
-  pattern: "dbg",
-  desc: "debug reply message",
-  category: "whatsapp",
-  fromMe: true,
-  filename: __filename
-}, async (ctx) => {
-  try {
-    const r = ctx.reply_message;
-    const info = {
-      replyKeys: r ? Object.keys(r) : null,
-      mtype: r?.mtype,
-      viewOnce: r?.viewOnce,
-      msgKeys: r?.msg ? Object.keys(r.msg) : null,
-      hasMediaKey: !!r?.msg?.mediaKey
-    };
-    await ctx.reply("```" + JSON.stringify(info, null, 2) + "```");
-  } catch (e) {
-    await ctx.reply("```" + String(e) + "```");
   }
 });
