@@ -412,7 +412,7 @@ smd({
     await ctx.error(err + "\n\ncommand: unblock", err);
   }
 });
-Cmd({
+cmd({
   pattern: "vv",
   alias: ["viewonce", "retrive"],
   desc: "download viewOnce Message.",
