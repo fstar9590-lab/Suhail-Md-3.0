@@ -1,0 +1,18 @@
+cmd({
+  pattern: "dbg",
+  desc: "debug",
+  category: "whatsapp",
+  filename: __filename
+}, async (ctx) => {
+  try {
+    const q = ctx.reply_message;
+    await ctx.reply(JSON.stringify({
+      ctxKeys: Object.keys(ctx),
+      replyKeys: q ? Object.keys(q) : null,
+      msgKeys: ctx.msg ? Object.keys(ctx.msg) : null,
+      mekKeys: ctx.mek ? Object.keys(ctx.mek) : null
+    }, null, 2));
+  } catch (e) {
+    await ctx.reply(String(e));
+  }
+});
