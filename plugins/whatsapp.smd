@@ -421,28 +421,78 @@ cmd({
   filename: __filename
 }, async (ctx, text) => {
   try {
-    var viewOnceMsg = ctx.reply_message && ctx.reply_message.viewOnce ? ctx.reply_message : false;
-    if (!viewOnceMsg) {
+    const fs = require("fs");
+    const replied = ctx.reply_message;
+    if (!replied) {
       return ctx.reply("```Please Reply A ViewOnce Message```");
     }
+
+    // Unwrap all possible WhatsApp ViewOnce containers (v1, v2, v2Extension, or direct)
+    const rawMsg = replied.message || {};
+    const unwrapped =
+      rawMsg?.viewOnceMessage?.message ||
+      rawMsg?.viewOnceMessageV2?.message ||
+      rawMsg?.viewOnceMessageV2Extension?.message ||
+      rawMsg;
+
+    // Extract the actual inner media node (imageMessage, videoMessage, or audioMessage)
+    const mediaKey = ["imageMessage", "videoMessage", "audioMessage"].find(
+      (key) => unwrapped && unwrapped[key]
+    );
+    const mediaObj = mediaKey ? unwrapped[mediaKey] : replied.msg;
+
+    // Verify it is actually a ViewOnce message across old and new Baileys formats
+    const isViewOnce = Boolean(
+      replied.viewOnce ||
+      rawMsg?.viewOnceMessage ||
+      rawMsg?.viewOnceMessageV2 ||
+      rawMsg?.viewOnceMessageV2Extension ||
+      mediaObj?.viewOnce ||
+      replied.msg?.viewOnce
+    );
+
+    if (!isViewOnce || !mediaObj) {
+      return ctx.reply("```Please Reply A ViewOnce Message```");
+    }
+
+    // Resolve clean Baileys send key: "image", "video", or "audio"
+    let sendType = mediaKey
+      ? mediaKey.replace("Message", "")
+      : (replied.mtype2 || replied.mtype || "").split("Mes")[0];
+
+    if (!["image", "video", "audio"].includes(sendType)) {
+      const mime = mediaObj.mimetype || "";
+      if (mime.startsWith("image/")) sendType = "image";
+      else if (mime.startsWith("video/")) sendType = "video";
+      else if (mime.startsWith("audio/")) sendType = "audio";
+      else return ctx.reply("```Unsupported ViewOnce Media Type```");
+    }
+
     let quoted = {
-      key: viewOnceMsg.key,
+      key: replied.key,
       message: {
         conversation: "```[VIEWONCE FOUND DOWNLOAD 100%]```"
       }
     };
-    let mediaPath = await ctx.bot.downloadAndSaveMediaMessage(viewOnceMsg.msg);
-    await ctx.bot.sendMessage(ctx.jid, {
-      [viewOnceMsg.mtype2.split("Mes")[0]]: {
-        url: mediaPath
-      },
-      caption: viewOnceMsg.body
-    }, {
-      quoted: quoted
-    });
+
+    let mediaPath = await ctx.bot.downloadAndSaveMediaMessage(mediaObj);
+    let payload = {
+      [sendType]: { url: mediaPath }
+    };
+
+    if (sendType === "audio") {
+      payload.mimetype = mediaObj.mimetype || "audio/mp4";
+      payload.ptt = Boolean(mediaObj.ptt);
+    } else {
+      payload.caption = mediaObj.caption || replied.body || "";
+    }
+
+    await ctx.bot.sendMessage(ctx.jid, payload, { quoted });
+
+    if (mediaPath && fs.existsSync(mediaPath)) {
+      fs.unlinkSync(mediaPath);
+    }
   } catch (err) {
-    // was `message.error` - there is no `message` in this handler (it is `ctx`), so any failure
-    // inside .vv threw a second ReferenceError and the actual cause was lost.
     await ctx.error(err + "\n\ncommand: vv", err);
   }
 });
